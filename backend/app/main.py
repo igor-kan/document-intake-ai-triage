@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from io import BytesIO
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -12,7 +13,17 @@ from .policies import resolve_policy
 from .runtime import detect_ml_frameworks
 from .triage import infer_document_type, infer_priority
 
-app = FastAPI(title="Document Intake and AI Triage", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    job_queue.start(process_batch_document)
+    try:
+        yield
+    finally:
+        job_queue.stop()
+
+
+app = FastAPI(title="Document Intake and AI Triage", version="0.3.0", lifespan=lifespan)
 job_queue = IntakeJobQueue()
 
 
@@ -31,6 +42,10 @@ class ReviewRequest(BaseModel):
     corrected_document_type: str = Field(min_length=2)
     corrected_priority: str = Field(min_length=2)
     notes: str = ""
+
+
+class JobListResponse(BaseModel):
+    items: list[dict]
 
 
 def analyze_document(
@@ -100,19 +115,9 @@ def process_batch_document(document: dict) -> dict:
     )
 
 
-@app.on_event("startup")
-def startup() -> None:
-    job_queue.start(process_batch_document)
-
-
-@app.on_event("shutdown")
-def shutdown() -> None:
-    job_queue.stop()
-
-
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "phase": "phase-2"}
+    return {"status": "ok", "phase": "phase-2", "version": app.version}
 
 
 @app.get("/api/runtime")
@@ -144,6 +149,22 @@ def get_job(job_id: str) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail="job_not_found")
     return job
+
+
+@app.get("/api/intake/jobs")
+def list_jobs(status: str | None = None) -> JobListResponse:
+    items = []
+    for job in job_queue.list_jobs():
+        if status and job["status"] != status:
+            continue
+        items.append(job)
+    items.sort(key=lambda item: item["submitted_at"], reverse=True)
+    return JobListResponse(items=items)
+
+
+@app.get("/api/intake/queue/stats")
+def queue_stats() -> dict:
+    return job_queue.stats()
 
 
 @app.post("/api/intake/jobs/{job_id}/review")

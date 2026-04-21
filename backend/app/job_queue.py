@@ -70,6 +70,20 @@ class IntakeJobQueue:
 
             return deepcopy(job)
 
+    def list_jobs(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [deepcopy(item) for item in self._jobs.values()]
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            items = list(self._jobs.values())
+            return {
+                "total_jobs": len(items),
+                "queued_jobs": sum(1 for item in items if item["status"] == "queued"),
+                "processing_jobs": sum(1 for item in items if item["status"] == "processing"),
+                "completed_jobs": sum(1 for item in items if item["status"] == "completed"),
+            }
+
     def _run(self) -> None:
         while not self._stop.is_set():
             try:

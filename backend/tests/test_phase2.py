@@ -72,3 +72,12 @@ def test_batch_queue_and_review_flow(client: TestClient) -> None:
     reviewed = review.json()
     assert reviewed["result"]["document_type"] == "pdf_form"
     assert reviewed["result"]["human_review"]["applied"] is True
+
+    jobs = client.get("/api/intake/jobs")
+    assert jobs.status_code == 200
+    assert any(item["job_id"] == job_id for item in jobs.json()["items"])
+
+    stats = client.get("/api/intake/queue/stats")
+    assert stats.status_code == 200
+    assert stats.json()["total_jobs"] >= 1
+    assert stats.json()["completed_jobs"] >= 1
